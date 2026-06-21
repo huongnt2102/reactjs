@@ -4,6 +4,7 @@ class Http {
       baseURL: 'http://localhost:4000',
       timeout: 10000
     })
+    this.refreshTokenRequest = null;
     this.instance.interceptors.request.use(config => {
       console.log("config ", config);
       const access_token = localStorage.getItem('access_token');
@@ -11,10 +12,27 @@ class Http {
         config.headers.Authorization = `Bearer ${access_token}`;
       }
       return config
-    }, error => Promise.reject(error))
+    }, error => Promise.reject(error));
+
     this.instance.interceptors.response.use(
-        config => config.data,
-        error => Promise.reject(error))
+      config => config.data,
+      error => {
+        console.log('loi', error);
+        if (error.response.status === 401 && error.response.data.name === 'EXPIRED_ACCESS_TOKEN') {
+          this.refreshTokenRequest = this.refreshTokenRequest ? this.refreshTokenRequest : refreshToken().finally(() => {
+            this.refreshTokenRequest = null;
+          })
+          return this.refreshTokenRequest.then(access_token => {
+            error.response.config.Authorization = `Bearer ${access_token}`;
+            // goi lai API vua bi loi
+            return this.instance(error.response.config);
+          }).catch(refreshTokenError => {
+            throw refreshTokenError;
+          })
+        }
+        Promise.reject(error);
+      }
+    );
   }
 
   get(url) {
@@ -40,6 +58,20 @@ const fetchProducts = () => {
     console.log(res);
   })
   .catch(error => console.log(error));
+}
+
+const refreshToken = async() => {
+  try {
+    const res = await http.post('/refresh-token', {
+      refresh_token: localStorage.getItem('refresh_token')
+    });
+    const {access_token} = res.data;
+    localStorage.setItem('access_token', access_token);
+    return access_token;
+  } catch (error) {
+    localStorage.clear();
+    throw error.response;
+  }
 }
 
 document.getElementById('login-form').addEventListener('submit',
@@ -78,4 +110,8 @@ document.getElementById('btn-get-both').addEventListener('click',
     fetchProfile();
     fetchProducts();
   }
+)
+
+document.getElementById('btn-refresh-token').addEventListener('click',
+  event => refreshToken()
 )
